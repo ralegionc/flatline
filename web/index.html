@@ -1,0 +1,874 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>flatline — stepping a regex engine</title>
+<style>
+:root{
+  --bg:#0a0d12; --bg2:#0d1117; --panel:#111720; --panel2:#161d27;
+  --line:#1e2732; --line2:#2a3644;
+  --ink:#dfe6f0; --ink2:#b9c4d2; --muted:#7d8b9d; --dim:#5b6879;
+  --cyan:#4fd1c5; --cyan2:#7fe6dc;
+  --amber:#f0a92e; --red:#f2544b; --green:#9ece6a; --blue:#7aa2f7; --violet:#bb9af7;
+  --mono:"SF Mono","JetBrains Mono",ui-monospace,"Cascadia Code",Menlo,Consolas,monospace;
+  --sans:"Inter","Segoe UI",system-ui,-apple-system,Roboto,sans-serif;
+  --serif:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;
+  --row:26px;
+}
+*{box-sizing:border-box}
+body{
+  margin:0;background:var(--bg);color:var(--ink);
+  font-family:var(--sans);font-size:15px;line-height:1.6;
+  -webkit-font-smoothing:antialiased;
+  background-image:radial-gradient(1100px 520px at 72% -8%,rgba(79,209,197,.07),rgba(0,0,0,0) 62%);
+}
+.wrap{max-width:1220px;margin:0 auto;padding:0 26px}
+.mono{font-family:var(--mono)}
+.muted{color:var(--muted)}
+.small{font-size:13px}
+h1,h2,h3{font-family:var(--serif);font-weight:600;line-height:1.15;margin:0}
+a{color:var(--cyan2);text-decoration:none;border-bottom:1px solid rgba(127,230,220,.28)}
+
+/* ---------- header ---------- */
+header.hero{border-bottom:1px solid var(--line);padding:64px 0 38px}
+.kicker{font-family:var(--mono);font-size:11.5px;letter-spacing:3.2px;text-transform:uppercase;color:var(--cyan);margin-bottom:15px}
+.hero h1{font-size:56px;letter-spacing:-.5px}
+.hero .sub{font-family:var(--serif);font-style:italic;font-size:21px;color:var(--ink2);margin-top:12px;max-width:720px}
+.hero p.thesis{color:var(--muted);max-width:700px;margin-top:18px;font-size:15px}
+.badges{display:flex;flex-wrap:wrap;gap:9px;margin-top:26px}
+.badge{display:inline-flex;align-items:center;gap:8px;background:var(--panel);border:1px solid var(--line2);
+  border-radius:999px;padding:6px 13px;font-family:var(--mono);font-size:12px;color:var(--ink2)}
+.badge .dot{width:7px;height:7px;border-radius:50%;background:var(--dim);flex:none}
+.badge.ok .dot{background:var(--green);box-shadow:0 0 8px rgba(158,206,106,.6)}
+.badge.bad .dot{background:var(--red);box-shadow:0 0 8px rgba(242,84,75,.6)}
+
+/* ---------- sections ---------- */
+section{padding:54px 0;border-bottom:1px solid var(--line)}
+.sec-kicker{font-family:var(--mono);font-size:11px;letter-spacing:3px;text-transform:uppercase;color:var(--cyan);margin-bottom:11px}
+.sec-title{font-size:31px;margin-bottom:9px}
+.sec-lede{color:var(--muted);max-width:730px;margin-bottom:26px}
+
+/* ---------- controls ---------- */
+.controls{display:grid;grid-template-columns:1fr 1fr auto;gap:14px;align-items:end;margin-bottom:18px}
+.field{display:flex;flex-direction:column;gap:6px;min-width:0}
+.field label{font-family:var(--mono);font-size:11px;letter-spacing:1.6px;text-transform:uppercase;color:var(--muted)}
+input[type=text]{
+  font-family:var(--mono);font-size:14.5px;color:var(--ink);
+  background:var(--bg2);border:1px solid var(--line2);border-radius:7px;padding:10px 12px;width:100%;
+}
+input[type=text]:focus{outline:none;border-color:var(--cyan);box-shadow:0 0 0 3px rgba(79,209,197,.11)}
+input.bad{border-color:var(--red)}
+input[type=number]{font-family:var(--mono);font-size:14px;color:var(--ink);background:var(--bg2);
+  border:1px solid var(--line2);border-radius:7px;padding:10px;width:84px}
+.presets{display:flex;flex-wrap:wrap;gap:7px;margin-bottom:22px}
+button{
+  font-family:var(--mono);font-size:12.5px;color:var(--ink2);background:var(--panel);
+  border:1px solid var(--line2);border-radius:6px;padding:7px 12px;cursor:pointer;transition:.13s;
+}
+button:hover{border-color:var(--cyan);color:var(--ink)}
+button:disabled{opacity:.34;cursor:default;border-color:var(--line2);color:var(--muted)}
+button.primary{background:rgba(79,209,197,.12);border-color:rgba(79,209,197,.5);color:var(--cyan2)}
+
+.err{font-family:var(--mono);font-size:13px;color:var(--red);background:rgba(242,84,75,.07);
+  border:1px solid rgba(242,84,75,.3);border-radius:8px;padding:12px 14px;white-space:pre;overflow-x:auto;margin-bottom:18px}
+
+/* ---------- tape ---------- */
+.tape-wrap{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px 18px;margin-bottom:16px}
+.tape{display:flex;flex-wrap:wrap;gap:3px;font-family:var(--mono);font-size:16px}
+.cell{min-width:24px;height:32px;display:flex;align-items:center;justify-content:center;
+  border:1px solid var(--line2);border-radius:5px;background:var(--bg2);color:var(--ink2);padding:0 5px;position:relative;transition:.12s}
+.cell.done{opacity:.42}
+.cell.here{border-color:var(--cyan);background:rgba(79,209,197,.16);color:#fff;box-shadow:0 0 0 3px rgba(79,209,197,.13)}
+.cell.inmatch{border-color:var(--green);background:rgba(158,206,106,.13);color:var(--green)}
+.cell.eof{border-style:dashed;color:var(--dim);font-size:11px;letter-spacing:1px}
+.tape-legend{display:flex;gap:18px;margin-top:12px;font-family:var(--mono);font-size:11.5px;color:var(--muted)}
+
+/* ---------- machine layout ---------- */
+.machine{display:grid;grid-template-columns:minmax(0,1.45fr) minmax(0,1fr);gap:18px;align-items:start}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.panel > h3{font-family:var(--mono);font-size:11px;letter-spacing:2.4px;text-transform:uppercase;color:var(--muted);
+  padding:13px 16px;border-bottom:1px solid var(--line);background:var(--panel2);font-weight:500}
+.panel .body{padding:14px 16px}
+.panel .body.tight{padding:10px 0 12px}
+
+/* program listing */
+.prog{display:flex;font-family:var(--mono);font-size:13px;overflow-x:auto}
+.gutter{flex:none;position:relative}
+.rows{flex:1;min-width:0}
+.row{height:var(--row);display:flex;align-items:center;gap:11px;padding:0 14px 0 6px;white-space:nowrap;transition:background .12s}
+.row.live{background:rgba(79,209,197,.08);box-shadow:inset 2px 0 0 var(--cyan)}
+.row.cur{background:rgba(79,209,197,.16)}
+.row .pc{color:var(--dim);width:24px;text-align:right;flex:none;font-size:12px}
+.row .op{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.op-split{color:var(--blue)} .op-jmp{color:var(--violet)} .op-match{color:var(--green)}
+.op-save{color:var(--muted)} .op-assert{color:var(--amber)}
+.op-char,.op-class,.op-any{color:var(--ink)}
+.marks{flex:none;display:flex;gap:3px}
+.mark{width:17px;height:17px;border-radius:4px;background:rgba(79,209,197,.2);border:1px solid var(--cyan);
+  color:var(--cyan2);font-size:10px;display:flex;align-items:center;justify-content:center}
+.mark.top{background:var(--cyan);color:#04120f;font-weight:700}
+
+/* thread list */
+.threads{font-family:var(--mono);font-size:12.5px}
+.thread{display:flex;gap:9px;align-items:baseline;padding:5px 0;border-bottom:1px dashed var(--line)}
+.thread:last-child{border-bottom:none}
+.thread .idx{width:17px;height:17px;border-radius:4px;flex:none;display:flex;align-items:center;justify-content:center;
+  font-size:10px;background:rgba(79,209,197,.2);border:1px solid var(--cyan);color:var(--cyan2)}
+.thread.top .idx{background:var(--cyan);color:#04120f;font-weight:700}
+.thread .what{flex:1;min-width:0}
+.thread .caps{color:var(--dim);font-size:11.5px}
+.empty-note{color:var(--dim);font-family:var(--mono);font-size:12.5px;padding:8px 0}
+
+/* stats */
+.stats{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--line);border-top:1px solid var(--line)}
+.stat{background:var(--panel);padding:12px 16px}
+.stat .n{font-family:var(--mono);font-size:20px;color:var(--ink)}
+.stat .n.good{color:var(--cyan)}
+.stat .l{font-family:var(--mono);font-size:10.5px;letter-spacing:1.4px;text-transform:uppercase;color:var(--muted);margin-top:3px}
+.invariant{font-family:var(--mono);font-size:12px;padding:11px 16px;border-top:1px solid var(--line);color:var(--green);background:rgba(158,206,106,.05)}
+.invariant.violated{color:var(--red);background:rgba(242,84,75,.07)}
+
+/* transport */
+.transport{display:flex;align-items:center;gap:12px;margin-top:16px;flex-wrap:wrap}
+input[type=range]{flex:1;min-width:200px;accent-color:var(--cyan);height:22px}
+.pos{font-family:var(--mono);font-size:12.5px;color:var(--muted);min-width:120px}
+
+/* result */
+.result{font-family:var(--mono);font-size:13.5px;margin-top:16px;padding:13px 16px;border-radius:8px;
+  border:1px solid var(--line2);background:var(--panel)}
+.result.hit{border-color:rgba(158,206,106,.4);background:rgba(158,206,106,.06);color:var(--green)}
+.result.miss{border-color:rgba(242,84,75,.32);background:rgba(242,84,75,.05);color:var(--red)}
+.result .caps{color:var(--ink2);margin-top:7px;font-size:12.5px}
+
+/* ---------- race ---------- */
+.race-grid{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr);gap:18px;align-items:start}
+.chart-box{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px}
+svg.chart{display:block;width:100%;height:auto}
+.axis-label{font-family:var(--mono);font-size:10.5px;fill:var(--muted)}
+.grid-line{stroke:var(--line);stroke-width:1}
+.cap-line{stroke:var(--red);stroke-width:1;stroke-dasharray:4 4;opacity:.65}
+.series-pike{fill:none;stroke:var(--cyan);stroke-width:2.5;stroke-linejoin:round}
+.series-bt{fill:none;stroke:var(--amber);stroke-width:2.5;stroke-linejoin:round}
+.legend-row{display:flex;gap:20px;margin-top:12px;font-family:var(--mono);font-size:12px;flex-wrap:wrap}
+.legend-row .k{display:inline-flex;align-items:center;gap:7px;color:var(--ink2)}
+.swatch{width:15px;height:3px;border-radius:2px;flex:none}
+.verdict{font-family:var(--mono);font-size:13px;line-height:1.9}
+.verdict .big{font-size:27px;color:var(--amber);display:block;margin:4px 0 2px}
+.verdict .num{color:var(--cyan)}
+table.rows-table{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:12px;margin-top:6px}
+table.rows-table th{text-align:right;color:var(--muted);font-weight:500;padding:5px 8px;border-bottom:1px solid var(--line);font-size:10.5px;letter-spacing:1.2px;text-transform:uppercase}
+table.rows-table td{text-align:right;padding:4px 8px;border-bottom:1px solid rgba(30,39,50,.5);color:var(--ink2)}
+table.rows-table td.pike{color:var(--cyan)}
+table.rows-table td.bt{color:var(--amber)}
+table.rows-table td.gave{color:var(--red)}
+.scroll{max-height:330px;overflow-y:auto}
+
+/* ---------- explainer ---------- */
+.two{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:20px 22px}
+.card h3{font-size:19px;margin-bottom:9px}
+.card .tag{font-family:var(--mono);font-size:10.5px;letter-spacing:2px;text-transform:uppercase;margin-bottom:11px}
+.card.bt .tag{color:var(--amber)} .card.pk .tag{color:var(--cyan)}
+.card p{color:var(--ink2);font-size:14.5px;margin:0 0 11px}
+.card p:last-child{margin-bottom:0}
+.card code{font-family:var(--mono);font-size:13px;color:var(--cyan2);background:rgba(79,209,197,.08);padding:1px 5px;border-radius:4px}
+
+footer{padding:38px 0 60px;color:var(--muted);font-size:13.5px}
+footer code{font-family:var(--mono);color:var(--ink2)}
+
+@media (max-width:940px){
+  .machine,.race-grid,.two{grid-template-columns:1fr}
+  .controls{grid-template-columns:1fr}
+  .hero h1{font-size:40px}
+}
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap">
+    <div class="kicker">Linear-time regular expressions</div>
+    <h1>flatline</h1>
+    <div class="sub">A regex engine that cannot be made to blow up — and a debugger that shows you why.</div>
+    <p class="thesis">
+      The engines in Python, Java, JavaScript and PCRE all match by backtracking: they commit to one
+      possibility and unwind when it fails. On the wrong pattern that costs exponential time, which is
+      how a single HTTP request takes a service down. flatline simulates every possibility at once, so
+      its worst case and its best case are the same case. Step it below, then race it.
+    </p>
+    <div class="badges">
+      <span class="badge" id="badge-port"><span class="dot"></span><span>checking port…</span></span>
+      <span class="badge"><span class="dot" style="background:var(--cyan)"></span><span>O(n&#183;m), every input</span></span>
+      <span class="badge"><span class="dot" style="background:var(--blue)"></span><span>Thompson NFA + Pike VM</span></span>
+      <span class="badge"><span class="dot" style="background:var(--violet)"></span><span>no dependencies</span></span>
+    </div>
+  </div>
+</header>
+
+<section>
+  <div class="wrap">
+    <div class="sec-kicker">Part one</div>
+    <h2 class="sec-title">Step the machine</h2>
+    <p class="sec-lede">
+      The pattern is compiled to a small program; every instruction is one NFA state. The VM keeps a
+      list of threads, each parked on one instruction, and advances all of them by one character per
+      step. Scrub through and watch the thread list: it is bounded by the length of the program, so no
+      input can widen it. That bound is the whole guarantee.
+    </p>
+
+    <div class="presets" id="step-presets"></div>
+
+    <div class="controls">
+      <div class="field">
+        <label for="pattern">Pattern</label>
+        <input type="text" id="pattern" spellcheck="false" value="(\w+)@(\w+)\.com">
+      </div>
+      <div class="field">
+        <label for="subject">Subject</label>
+        <input type="text" id="subject" spellcheck="false" value="mail bob@example.com now">
+      </div>
+      <div class="field" style="max-width:110px">
+        <label for="flags">Flags</label>
+        <input type="text" id="flags" spellcheck="false" value="" placeholder="ism">
+      </div>
+    </div>
+
+    <div id="parse-error" class="err" hidden></div>
+
+    <div id="machine-ui">
+      <div class="tape-wrap">
+        <div class="tape" id="tape"></div>
+        <div class="tape-legend">
+          <span><b style="color:var(--cyan)">▮</b> cursor</span>
+          <span><b style="color:var(--green)">▮</b> inside the match, once found</span>
+          <span><b style="color:var(--dim)">▮</b> consumed</span>
+        </div>
+      </div>
+
+      <div class="machine">
+        <div class="panel">
+          <h3>Compiled program &mdash; one instruction per NFA state</h3>
+          <div class="body tight">
+            <div class="prog">
+              <div class="gutter" id="gutter"></div>
+              <div class="rows" id="rows"></div>
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <div class="panel">
+            <h3>Live threads, highest priority first</h3>
+            <div class="body">
+              <div class="threads" id="threads"></div>
+            </div>
+            <div class="stats">
+              <div class="stat"><div class="n" id="s-live">0</div><div class="l">live now</div></div>
+              <div class="stat"><div class="n" id="s-peak">0</div><div class="l">peak</div></div>
+              <div class="stat"><div class="n" id="s-prog">0</div><div class="l">program size</div></div>
+              <div class="stat"><div class="n good" id="s-steps">0</div><div class="l">total steps</div></div>
+            </div>
+            <div class="invariant" id="invariant"></div>
+          </div>
+          <div class="result" id="result"></div>
+        </div>
+      </div>
+
+      <div class="transport">
+        <button id="btn-first">|&#9664;</button>
+        <button id="btn-prev">&#9664;</button>
+        <button id="btn-play" class="primary">&#9654; play</button>
+        <button id="btn-next">&#9654;</button>
+        <button id="btn-last">&#9654;|</button>
+        <input type="range" id="scrub" min="0" max="0" value="0">
+        <span class="pos" id="pos-label"></span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <div class="sec-kicker">Part two</div>
+    <h2 class="sec-title">The race</h2>
+    <p class="sec-lede">
+      Both engines below run the <em>same compiled program</em> and return the same answers. The only
+      difference is strategy. Work is counted in steps rather than seconds so the comparison does not
+      depend on the machine: one step is one thread advance for flatline, one path step for the
+      backtracker. Note the y axis is logarithmic — on a linear axis the flatline series would be
+      indistinguishable from zero.
+    </p>
+
+    <div class="presets" id="race-presets"></div>
+
+    <div class="controls" style="grid-template-columns:1.7fr .5fr .5fr auto auto">
+      <div class="field">
+        <label for="r-pattern">Pattern</label>
+        <input type="text" id="r-pattern" spellcheck="false" value="(a+)+b">
+      </div>
+      <div class="field">
+        <label for="r-unit">Repeated unit</label>
+        <input type="text" id="r-unit" spellcheck="false" value="a">
+      </div>
+      <div class="field">
+        <label for="r-suffix">Suffix</label>
+        <input type="text" id="r-suffix" spellcheck="false" value="!">
+      </div>
+      <div class="field">
+        <label for="r-max">Max n</label>
+        <input type="number" id="r-max" value="28" min="2" max="60">
+      </div>
+      <div class="field">
+        <label>&nbsp;</label>
+        <button id="btn-race" class="primary">run the race</button>
+      </div>
+    </div>
+
+    <div id="race-error" class="err" hidden></div>
+
+    <div class="race-grid">
+      <div class="chart-box">
+        <svg class="chart" id="chart" viewBox="0 0 720 380" preserveAspectRatio="xMidYMid meet"></svg>
+        <div class="legend-row">
+          <span class="k"><span class="swatch" style="background:var(--cyan)"></span>flatline (Pike VM)</span>
+          <span class="k"><span class="swatch" style="background:var(--amber)"></span>backtracking</span>
+          <span class="k"><span class="swatch" style="background:var(--red)"></span>budget exhausted</span>
+        </div>
+      </div>
+      <div class="panel">
+        <h3>Steps taken</h3>
+        <div class="body">
+          <div class="verdict" id="verdict"></div>
+          <div class="scroll">
+            <table class="rows-table" id="race-table"></table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <div class="sec-kicker">Part three</div>
+    <h2 class="sec-title">Two ways to run the same program</h2>
+    <p class="sec-lede">
+      The difference is not an optimisation. It is a different thing being carried through the input.
+    </p>
+    <div class="two">
+      <div class="card bt">
+        <div class="tag">Backtracking &mdash; carries a path</div>
+        <h3>One guess at a time</h3>
+        <p>
+          At every <code>split</code> the matcher takes the preferred arm and remembers the other one.
+          If the preferred arm eventually fails, it unwinds and tries the alternative. The state it
+          carries is a single path through the pattern, plus a stack of the choices it has not tried.
+        </p>
+        <p>
+          For <code>(a+)+b</code> against a run of <em>a</em>s with no <em>b</em>, every way of
+          splitting those <em>a</em>s into groups is a distinct path, and the matcher must exhaust all
+          of them before it can report failure. There are 2<sup>n-1</sup> of them. At n = 30 that is
+          half a billion, and the request never returns.
+        </p>
+        <p>
+          This is what Python, Java, JavaScript, .NET, Ruby and PCRE all do, and why ReDoS is a
+          vulnerability class with its own CWE.
+        </p>
+      </div>
+      <div class="card pk">
+        <div class="tag">Pike VM &mdash; carries a set</div>
+        <h3>All guesses at once</h3>
+        <p>
+          At every <code>split</code> the VM follows <em>both</em> arms and keeps both threads. All
+          threads sit at the same input position and advance together, one character per step. The
+          state it carries is a set of instructions, not a path.
+        </p>
+        <p>
+          Two threads on the same instruction at the same position will behave identically from there
+          on, so the second is discarded. That single rule caps the thread list at the length of the
+          program, whatever the input. Work per character is therefore bounded, and total work is
+          <code>len(text) &#215; len(program)</code>.
+        </p>
+        <p>
+          The cost is real but bounded: no backreferences, ever. A backreference makes the language
+          non-regular, and no NFA simulation can evaluate one in linear time. flatline refuses them at
+          compile time rather than silently giving up the guarantee.
+        </p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    Everything on this page is computed in your browser by <code>engine.js</code>, a port of the Python
+    package in this repository. The port is checked against the Python engine on load — programs,
+    spans, step counts and error offsets — using the corpus in <code>conformance.js</code>, which
+    <code>tools/gen_conformance.py</code> generates and the test suite regenerates to catch drift.
+  </div>
+</footer>
+
+<script src="engine.js"></script>
+<script src="conformance.js"></script>
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const fl = window.flatline;
+
+/* ================================================================== *
+ * self-test: does the browser's copy of the engine agree with Python?
+ * ================================================================== */
+function selfTest(){
+  const badge = $("badge-port");
+  if (!window.CONFORMANCE) {
+    badge.className = "badge";
+    badge.lastElementChild.textContent = "conformance corpus not loaded";
+    return;
+  }
+  let checked = 0, failed = 0;
+  const eq = (a,b) => JSON.stringify(a) === JSON.stringify(b);
+
+  for (const c of CONFORMANCE.cases){
+    checked++;
+    try {
+      const prog = fl.compileProgram(c.pattern, c.flags, false);
+      if (!eq(prog.insts.map(fl.renderInst), c.program)) { failed++; continue; }
+      const r = fl.pikeRun(prog, c.text);
+      if ((r.saved !== null) !== c.matched) { failed++; continue; }
+      if (r.steps !== c.pike_steps || r.maxThreads !== c.pike_max_threads) { failed++; continue; }
+      if (c.matched){
+        const spans = [];
+        for (let i = 0; i <= prog.ngroups; i++){
+          const s = r.saved[2*i], e = r.saved[2*i+1];
+          spans.push(s === null || e === null ? [-1,-1] : [s,e]);
+        }
+        if (!eq(spans, c.spans)) { failed++; }
+      }
+    } catch (e) { failed++; }
+  }
+  for (const r of CONFORMANCE.refusals){
+    checked++;
+    try { fl.compileProgram(r.pattern, "", false); failed++; }
+    catch (e){ if (!e.detail || !e.detail.includes(r.fragment) || e.pos !== r.pos) failed++; }
+  }
+
+  badge.className = "badge " + (failed ? "bad" : "ok");
+  badge.lastElementChild.textContent = failed
+    ? `port drift: ${failed}/${checked} cases disagree`
+    : `port verified · ${checked}/${checked} match the Python engine`;
+}
+
+/* ================================================================== *
+ * part one: the stepper
+ * ================================================================== */
+
+const STEP_PRESETS = [
+  ["an email address", "(\\w+)@(\\w+)\\.com", "mail bob@example.com now", ""],
+  ["leftmost-first", "a|ab", "ab", ""],
+  ["greedy vs lazy", "<.*?>", "<a><b>", ""],
+  ["word boundaries", "\\bcat\\b", "the cat sat", ""],
+  ["counted repeat", "a{2,4}", "aaaaa", ""],
+  ["the evil one", "(a+)+b", "aaaaaa!", ""],
+  ["backtracking's nightmare", "(a|a)*b", "aaaaa!", ""],
+];
+
+let TRACE = null;      // {prog, steps, saved, maxThreads, totalSteps}
+let CURSOR = 0;
+let PLAYING = null;
+
+function opClass(op){ return "op-" + op; }
+
+/* Lane assignment for the control-flow arcs in the gutter.  Each edge gets the
+ * innermost lane that no overlapping edge is already using, so nested loops
+ * nest visually instead of drawing on top of each other. */
+function assignLanes(edges){
+  const sorted = edges.slice().sort((a,b) => (a.span - b.span) || (a.lo - b.lo));
+  const lanes = [];
+  for (const e of sorted){
+    let lane = 0;
+    for (;;){
+      const used = lanes[lane] || [];
+      if (!used.some(o => !(e.hi < o.lo || e.lo > o.hi))) {
+        (lanes[lane] = used).push(e);
+        e.lane = lane;
+        break;
+      }
+      lane++;
+    }
+  }
+  return sorted;
+}
+
+function buildGutter(prog){
+  const ROW = 26;
+  const edges = [];
+  prog.insts.forEach((inst, pc) => {
+    const targets = inst.op === "jmp" ? [[inst.x, true]]
+                  : inst.op === "split" ? [[inst.x, true], [inst.y, false]]
+                  : [];
+    for (const [to, preferred] of targets){
+      if (to === pc + 1) continue;              // a fall-through needs no arc
+      edges.push({ from: pc, to, preferred, lo: Math.min(pc,to), hi: Math.max(pc,to),
+                   span: Math.abs(pc - to), back: to < pc });
+    }
+  });
+
+  assignLanes(edges);
+  const maxLane = edges.reduce((m,e) => Math.max(m, e.lane), -1);
+  const width = (maxLane + 1) * 11 + 16;
+  const height = prog.insts.length * ROW;
+  const y = (pc) => pc * ROW + ROW/2;
+
+  let paths = "";
+  for (const e of edges){
+    const x = width - 8 - e.lane * 11;
+    const y1 = y(e.from), y2 = y(e.to);
+    const colour = e.preferred ? "var(--blue)" : "var(--line2)";
+    const dash = e.preferred ? "" : ' stroke-dasharray="3 3"';
+    paths += `<path d="M ${width-2} ${y1} L ${x+4} ${y1} Q ${x} ${y1} ${x} ${y1 + (y2>y1?5:-5)} L ${x} ${y2 + (y2>y1?-5:5)} Q ${x} ${y2} ${x+4} ${y2} L ${width-5} ${y2}"`
+           + ` fill="none" stroke="${colour}" stroke-width="1.2"${dash}/>`
+           + `<path d="M ${width-5} ${y2} l -4 -3 l 0 6 z" fill="${colour}"/>`;
+  }
+  $("gutter").innerHTML =
+    `<svg width="${width}" height="${height}" style="display:block">${paths}</svg>`;
+}
+
+function buildRows(prog){
+  $("rows").innerHTML = prog.insts.map((inst, pc) =>
+    `<div class="row" data-pc="${pc}">`
+    + `<span class="pc">${pc}</span>`
+    + `<span class="op ${opClass(inst.op)}">${escapeHtml(fl.renderInst(inst))}</span>`
+    + `<span class="marks" data-marks="${pc}"></span>`
+    + `</div>`
+  ).join("");
+}
+
+function escapeHtml(s){
+  return s.replace(/[&<>"]/g, (ch) => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[ch]));
+}
+
+function showChar(ch){
+  if (ch === null || ch === undefined) return "EOF";
+  const named = {"\n":"\\n","\t":"\\t","\r":"\\r"," ":"␣"};
+  return named[ch] !== undefined ? named[ch] : escapeHtml(ch);
+}
+
+function rebuild(){
+  const pattern = $("pattern").value;
+  const subject = $("subject").value;
+  const flags = $("flags").value;
+  const box = $("parse-error");
+
+  try {
+    TRACE = fl.trace(pattern, subject, flags);
+  } catch (e){
+    if (e.name !== "RegexSyntaxError") throw e;
+    $("pattern").classList.add("bad");
+    box.hidden = false;
+    box.textContent = e.detail + "\n\n    " + e.pattern + "\n    " + " ".repeat(e.pos) + "^";
+    $("machine-ui").style.opacity = ".35";
+    return;
+  }
+  $("pattern").classList.remove("bad");
+  box.hidden = true;
+  $("machine-ui").style.opacity = "1";
+
+  buildGutter(TRACE.prog);
+  buildRows(TRACE.prog);
+  $("scrub").max = String(Math.max(TRACE.steps.length - 1, 0));
+  CURSOR = 0;
+  $("scrub").value = "0";
+  render();
+}
+
+function render(){
+  if (!TRACE) return;
+  const step = TRACE.steps[CURSOR];
+  const subject = $("subject").value;
+  const prog = TRACE.prog;
+
+  /* tape.  The match is only painted once the VM has actually recorded it --
+     showing the answer before the machine reaches it would give the game away
+     and, worse, suggest the engine knew it in advance. */
+  const spanNow = (TRACE.saved && step.matched) ? [TRACE.saved[0], TRACE.saved[1]] : null;
+  let tape = "";
+  for (let i = 0; i < subject.length; i++){
+    const cls = ["cell"];
+    if (i < step.sp) cls.push("done");
+    if (i === step.sp) cls.push("here");
+    if (spanNow && i >= spanNow[0] && i < spanNow[1]) cls.push("inmatch");
+    tape += `<span class="${cls.join(" ")}">${showChar(subject[i])}</span>`;
+  }
+  tape += `<span class="cell eof${step.sp >= subject.length ? " here" : ""}">EOF</span>`;
+  $("tape").innerHTML = tape;
+
+  /* program rows + thread markers */
+  document.querySelectorAll(".row").forEach(r => r.classList.remove("live","cur"));
+  document.querySelectorAll("[data-marks]").forEach(m => m.innerHTML = "");
+  step.threads.forEach((t, i) => {
+    const pc = t[0];
+    const row = document.querySelector(`.row[data-pc="${pc}"]`);
+    if (row) row.classList.add(i === 0 ? "cur" : "live");
+    const marks = document.querySelector(`[data-marks="${pc}"]`);
+    if (marks) marks.innerHTML += `<span class="mark${i===0?" top":""}">${i+1}</span>`;
+  });
+
+  /* thread list */
+  if (step.threads.length === 0){
+    $("threads").innerHTML = `<div class="empty-note">no live threads — `
+      + (step.matched ? `the search is finished` : `a new attempt starts at the next offset`)
+      + `</div>`;
+  } else {
+    $("threads").innerHTML = step.threads.map((t, i) => {
+      const [pc, saved] = t;
+      const inst = prog.insts[pc];
+      const caps = [];
+      for (let g = 0; g <= prog.ngroups; g++){
+        const s = saved[2*g], e = saved[2*g+1];
+        if (s !== null) caps.push(`${g}:${s}${e !== null ? "-" + e : "-"}`);
+      }
+      return `<div class="thread${i===0?" top":""}">`
+        + `<span class="idx">${i+1}</span>`
+        + `<span class="what"><span class="pc" style="color:var(--dim)">${pc}</span> `
+        + `<span class="${opClass(inst.op)}">${escapeHtml(fl.renderInst(inst))}</span>`
+        + (caps.length ? `<div class="caps">${caps.join("  ")}</div>` : ``)
+        + `</span></div>`;
+    }).join("");
+  }
+
+  /* stats */
+  const peakSoFar = TRACE.steps.slice(0, CURSOR + 1)
+    .reduce((m, s) => Math.max(m, s.threads.length), 0);
+  $("s-live").textContent = step.threads.length;
+  $("s-peak").textContent = peakSoFar;
+  $("s-prog").textContent = prog.insts.length;
+  $("s-steps").textContent = TRACE.totalSteps;
+
+  const inv = $("invariant");
+  const ok = TRACE.maxThreads <= prog.insts.length;
+  inv.className = "invariant" + (ok ? "" : " violated");
+  inv.textContent = ok
+    ? `peak ${TRACE.maxThreads} ≤ ${prog.insts.length} instructions — the thread list cannot outgrow the program`
+    : `INVARIANT VIOLATED: ${TRACE.maxThreads} threads > ${prog.insts.length} instructions`;
+
+  /* result */
+  const res = $("result");
+  if (TRACE.saved){
+    const [s, e] = [TRACE.saved[0], TRACE.saved[1]];
+    let caps = "";
+    for (let g = 1; g <= prog.ngroups; g++){
+      const gs = TRACE.saved[2*g], ge = TRACE.saved[2*g+1];
+      const name = Object.keys(prog.names).find(k => prog.names[k] === g);
+      caps += `<div>group ${g}${name ? " (" + name + ")" : ""}: `
+        + (gs === null || ge === null ? `<span style="color:var(--dim)">unset</span>`
+           : `${escapeHtml(JSON.stringify(subject.slice(gs, ge)))} <span style="color:var(--dim)">[${gs}:${ge}]</span>`)
+        + `</div>`;
+    }
+    res.className = "result hit";
+    res.innerHTML = `matched ${escapeHtml(JSON.stringify(subject.slice(s, e)))} at [${s}:${e}]`
+      + (caps ? `<div class="caps">${caps}</div>` : ``);
+  } else {
+    res.className = "result miss";
+    res.textContent = "no match";
+  }
+
+  $("scrub").value = String(CURSOR);
+  $("pos-label").textContent =
+    `offset ${step.sp} · char ${step.char === null ? "EOF" : JSON.stringify(step.char)}`
+    + ` · ${CURSOR + 1}/${TRACE.steps.length}`;
+}
+
+function goto(i){
+  if (!TRACE) return;
+  CURSOR = Math.max(0, Math.min(i, TRACE.steps.length - 1));
+  render();
+}
+
+function stopPlaying(){
+  if (PLAYING){ clearInterval(PLAYING); PLAYING = null; $("btn-play").innerHTML = "&#9654; play"; }
+}
+
+$("btn-play").onclick = () => {
+  if (PLAYING) { stopPlaying(); return; }
+  if (CURSOR >= TRACE.steps.length - 1) CURSOR = 0;
+  $("btn-play").innerHTML = "&#10073;&#10073; pause";
+  PLAYING = setInterval(() => {
+    if (CURSOR >= TRACE.steps.length - 1) { stopPlaying(); return; }
+    goto(CURSOR + 1);
+  }, 480);
+};
+$("btn-next").onclick  = () => { stopPlaying(); goto(CURSOR + 1); };
+$("btn-prev").onclick  = () => { stopPlaying(); goto(CURSOR - 1); };
+$("btn-first").onclick = () => { stopPlaying(); goto(0); };
+$("btn-last").onclick  = () => { stopPlaying(); goto(TRACE.steps.length - 1); };
+$("scrub").oninput = (e) => { stopPlaying(); goto(parseInt(e.target.value, 10)); };
+
+for (const id of ["pattern","subject","flags"]){
+  $(id).addEventListener("input", () => { stopPlaying(); rebuild(); });
+}
+
+document.addEventListener("keydown", (e) => {
+  if (e.target.tagName === "INPUT") return;
+  if (e.key === "ArrowRight"){ stopPlaying(); goto(CURSOR + 1); e.preventDefault(); }
+  if (e.key === "ArrowLeft"){ stopPlaying(); goto(CURSOR - 1); e.preventDefault(); }
+});
+
+$("step-presets").innerHTML = STEP_PRESETS
+  .map((p, i) => `<button data-preset="${i}">${escapeHtml(p[0])}</button>`).join("");
+$("step-presets").onclick = (e) => {
+  const b = e.target.closest("[data-preset]");
+  if (!b) return;
+  const [, pattern, subject, flags] = STEP_PRESETS[+b.dataset.preset];
+  $("pattern").value = pattern; $("subject").value = subject; $("flags").value = flags;
+  stopPlaying(); rebuild();
+};
+
+/* ================================================================== *
+ * part two: the race
+ * ================================================================== */
+
+const RACE_PRESETS = [
+  ["(a+)+b", "(a+)+b", "a", "!", 28],
+  ["(a|a)*b", "(a|a)*b", "a", "!", 26],
+  ["(x+x+)+y", "(x+x+)+y", "x", "!", 22],
+  ["^(\\w+\\s?)*$", "^(\\w+\\s?)*$", "a", "!", 26],
+  ["a benign pattern", "\\w+@\\w+\\.com", "a", "!", 40],
+];
+
+const MAX_STEPS = 2000000;
+
+function runRace(){
+  const pattern = $("r-pattern").value;
+  const unit = $("r-unit").value || "a";
+  const suffix = $("r-suffix").value;
+  const maxN = Math.max(2, Math.min(60, parseInt($("r-max").value, 10) || 24));
+  const box = $("race-error");
+
+  let prog;
+  try { prog = fl.compileProgram(pattern, "", false); }
+  catch (e){
+    if (e.name !== "RegexSyntaxError") throw e;
+    box.hidden = false;
+    box.textContent = e.detail + "\n\n    " + e.pattern + "\n    " + " ".repeat(e.pos) + "^";
+    return;
+  }
+  box.hidden = true;
+
+  const rows = [];
+  for (let n = 1; n <= maxN; n++){
+    const text = unit.repeat(n) + suffix;
+    const p = fl.pikeRun(prog, text);
+    const b = fl.backtrackRun(prog, text, { maxSteps: MAX_STEPS });
+    rows.push({ n, pike: p.steps, bt: b.steps, gaveUp: b.gaveUp });
+  }
+  drawChart(rows, prog);
+  fillTable(rows);
+  writeVerdict(rows, prog);
+}
+
+function drawChart(rows, prog){
+  const W = 720, H = 380, L = 62, R = 18, T = 20, B = 44;
+  const iw = W - L - R, ih = H - T - B;
+  const maxY = Math.max(MAX_STEPS, ...rows.map(r => r.bt), ...rows.map(r => r.pike));
+  const maxN = rows.length;
+
+  const ly = (v) => Math.log10(Math.max(v, 1));
+  const topY = Math.ceil(ly(maxY));
+  const px = (n) => L + ((n - 1) / Math.max(maxN - 1, 1)) * iw;
+  const py = (v) => T + ih - (ly(v) / topY) * ih;
+
+  let svg = "";
+
+  for (let d = 0; d <= topY; d++){
+    const y = T + ih - (d / topY) * ih;
+    svg += `<line class="grid-line" x1="${L}" y1="${y}" x2="${W-R}" y2="${y}"/>`;
+    const label = d === 0 ? "1" : "10" + String(d).split("").map(c => "⁰¹²³⁴⁵⁶⁷⁸⁹"[+c]).join("");
+    svg += `<text class="axis-label" x="${L-9}" y="${y+4}" text-anchor="end">${label}</text>`;
+  }
+
+  const capY = py(MAX_STEPS);
+  svg += `<line class="cap-line" x1="${L}" y1="${capY}" x2="${W-R}" y2="${capY}"/>`;
+  svg += `<text class="axis-label" x="${W-R}" y="${capY-7}" text-anchor="end" fill="var(--red)">step budget — beyond this the backtracker is abandoned</text>`;
+
+  const ticks = Math.min(maxN, 10);
+  for (let i = 0; i < ticks; i++){
+    const n = Math.round(1 + (i / Math.max(ticks-1,1)) * (maxN - 1));
+    svg += `<text class="axis-label" x="${px(n)}" y="${H-B+20}" text-anchor="middle">${n}</text>`;
+  }
+  svg += `<text class="axis-label" x="${L+iw/2}" y="${H-6}" text-anchor="middle">n — length of the repeated prefix</text>`;
+  svg += `<text class="axis-label" x="14" y="${T+ih/2}" text-anchor="middle" transform="rotate(-90 14 ${T+ih/2})">steps (log scale)</text>`;
+
+  const finished = rows.filter(r => !r.gaveUp);
+  const line = (pts) => pts.map((p,i) => (i?"L":"M") + px(p.n) + " " + py(p.v)).join(" ");
+
+  svg += `<path class="series-bt" d="${line(finished.map(r => ({n:r.n, v:r.bt})))}"/>`;
+  svg += `<path class="series-pike" d="${line(rows.map(r => ({n:r.n, v:r.pike})))}"/>`;
+
+  for (const r of rows){
+    svg += `<circle cx="${px(r.n)}" cy="${py(r.pike)}" r="2.6" fill="var(--cyan)"><title>n=${r.n}: ${r.pike} steps</title></circle>`;
+    if (r.gaveUp){
+      const y = capY;
+      svg += `<path d="M ${px(r.n)-4} ${y-4} l 8 8 M ${px(r.n)+4} ${y-4} l -8 8" stroke="var(--red)" stroke-width="1.8"><title>n=${r.n}: exceeded ${MAX_STEPS.toLocaleString()} steps</title></path>`;
+    } else {
+      svg += `<circle cx="${px(r.n)}" cy="${py(r.bt)}" r="2.6" fill="var(--amber)"><title>n=${r.n}: ${r.bt.toLocaleString()} steps</title></circle>`;
+    }
+  }
+  $("chart").innerHTML = svg;
+}
+
+function fillTable(rows){
+  const head = `<tr><th>n</th><th>flatline</th><th>backtracking</th><th>ratio</th></tr>`;
+  const body = rows.map(r => {
+    const ratio = r.gaveUp ? "&mdash;" : Math.round(r.bt / Math.max(r.pike,1)).toLocaleString() + "&times;";
+    return `<tr><td>${r.n}</td><td class="pike">${r.pike.toLocaleString()}</td>`
+      + (r.gaveUp ? `<td class="gave">gave up</td>` : `<td class="bt">${r.bt.toLocaleString()}</td>`)
+      + `<td>${ratio}</td></tr>`;
+  }).join("");
+  $("race-table").innerHTML = head + body;
+}
+
+function writeVerdict(rows, prog){
+  const finished = rows.filter(r => !r.gaveUp);
+  const gaveUpAt = rows.find(r => r.gaveUp);
+  const last = finished[finished.length - 1];
+  let html = `<div>both engines run the same <span class="num">${prog.insts.length}</span>-instruction program</div>`;
+
+  if (last){
+    const ratio = Math.round(last.bt / Math.max(last.pike, 1));
+    html += `<div style="margin-top:10px">at n = ${last.n}, backtracking does</div>`
+         + `<span class="big">${ratio.toLocaleString()}&times;</span>`
+         + `<div>more work than flatline —<br>${last.bt.toLocaleString()} steps against `
+         + `<span class="num">${last.pike.toLocaleString()}</span>.</div>`;
+  }
+  if (gaveUpAt){
+    const row = rows.find(r => r.n === gaveUpAt.n);
+    html += `<div style="margin-top:12px;color:var(--red)">at n = ${gaveUpAt.n} the backtracker `
+         + `passed ${MAX_STEPS.toLocaleString()} steps and was abandoned.</div>`
+         + `<div>flatline needed <span class="num">${row.pike.toLocaleString()}</span>.</div>`;
+  } else {
+    html += `<div style="margin-top:12px;color:var(--muted)">the backtracker survived every n here — `
+         + `this pattern has no ambiguity for it to get lost in.</div>`;
+  }
+  $("verdict").innerHTML = html;
+}
+
+$("btn-race").onclick = runRace;
+$("race-presets").innerHTML = RACE_PRESETS
+  .map((p, i) => `<button data-race="${i}">${escapeHtml(p[0])}</button>`).join("");
+$("race-presets").onclick = (e) => {
+  const b = e.target.closest("[data-race]");
+  if (!b) return;
+  const [, pattern, unit, suffix, maxN] = RACE_PRESETS[+b.dataset.race];
+  $("r-pattern").value = pattern; $("r-unit").value = unit;
+  $("r-suffix").value = suffix; $("r-max").value = maxN;
+  runRace();
+};
+
+/* ================================================================== */
+selfTest();
+rebuild();
+runRace();
+</script>
+</body>
+</html>
